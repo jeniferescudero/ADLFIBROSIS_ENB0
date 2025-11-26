@@ -13,22 +13,33 @@ CLASS_NAMES = ["F0", "F1", "F2", "F3", "F4"]
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def create_model_enb0(num_classes: int) -> nn.Module:
+    """
+    Crea la misma arquitectura EfficientNet-B0 que se usó para entrenar el modelo.
+    IMPORTANTE: debe coincidir con la definición usada en Colab cuando generaste
+    modelo_fibrosis_state_dict_cpu_enb0.joblib.
+    """
+    # Si al entrenar usaste weights=EfficientNet_B0_Weights.IMAGENET1K_V1,
+    # puedes poner lo mismo aquí o None (el state_dict va a sobrescribir todo).
+    model = models.efficientnet_b0(weights=None)
+
+    # Reemplazar la capa final tal como lo hiciste al entrenar
+    # (esta es la forma estándar que te propuse antes):
+    in_features = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(in_features, num_classes)
+
+    return model
+
+
 @st.cache_resource
 def load_model():
     """
-    Carga el modelo ResNet18 y aplica el state_dict guardado en CPU (.joblib).
+    Carga el modelo EfficientNet-B0 y aplica el state_dict guardado en CPU (.joblib).
     """
     num_classes = len(CLASS_NAMES)
 
-    # Misma arquitectura que usaste al entrenar
-    model = models.resnet18(weights=None)
-    in_features = model.fc.in_features
-    model.fc = nn.Sequential(
-        nn.Linear(in_features, 256),
-        nn.ReLU(),
-        nn.Dropout(p=0.5),
-        nn.Linear(256, num_classes),
-    )
+    # MISMA arquitectura que en entrenamiento (EfficientNet-B0)
+    model = create_model_enb0(num_classes)
 
     # Cargar state_dict ya en CPU
     state_dict = joblib.load("modelo_fibrosis_state_dict_cpu_enb0.joblib")
@@ -54,11 +65,9 @@ def preprocess_image(image: Image.Image) -> torch.Tensor:
     """
     Recibe una imagen PIL y devuelve un tensor listo para el modelo.
     """
-    # Asegurarse de que viene en PIL.Image
     if not isinstance(image, Image.Image):
         image = Image.fromarray(image)
 
-    # Aplicar transformaciones
     img = TRANSFORM(image)
     img = img.unsqueeze(0)  # batch size = 1
     return img.to(DEVICE)
@@ -87,7 +96,7 @@ def main():
     st.write(
         """
         Esta aplicación permite cargar una **imagen ecográfica hepática** y obtener una
-        predicción del estadio de fibrosis (F0–F4) usando un modelo de **red neuronal convolucional (CNN)**.
+        predicción del estadio de fibrosis (F0–F4) usando un modelo de **red neuronal convolucional (CNN)** basado en EfficientNet-B0.
         """
     )
 
@@ -96,14 +105,12 @@ def main():
         model = load_model()
     st.success("Modelo cargado correctamente.")
 
-    # Carga de imagen
     uploaded_file = st.file_uploader(
         "Sube una ecografía hepática (formato JPG, PNG o JPEG):",
         type=["jpg", "jpeg", "png"]
     )
 
     if uploaded_file is not None:
-        # Leer imagen con PIL
         image = Image.open(uploaded_file)
 
         col1, col2 = st.columns(2)
@@ -112,7 +119,6 @@ def main():
             st.subheader("Imagen original")
             st.image(image, use_column_width=True)
 
-        # Botón para predecir
         if st.button("Realizar predicción"):
             with st.spinner("Procesando imagen y ejecutando el modelo..."):
                 pred_idx, probs = predict(image, model)
@@ -122,12 +128,10 @@ def main():
                 st.subheader("Resultado de la predicción")
                 st.markdown(f"### Estadio predicho: **{pred_class}**")
 
-                # Mostrar probabilidades por clase
                 st.write("Probabilidades por clase:")
                 prob_dict = {cls: float(p) for cls, p in zip(CLASS_NAMES, probs)}
                 st.bar_chart(prob_dict)
 
-            # Mostrar tabla de probabilidades
             st.write("Detalle de probabilidades:")
             st.table(
                 {
